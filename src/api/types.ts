@@ -530,6 +530,9 @@ export interface WsSnapshot {
 }
 
 export interface FleetEnergy {
+  /** Matched energy/token intervals only; absent on older servers/history. */
+  accounting24h?: import("../shared/energyPricing").EnergyCostWindow | null;
+  accounting31d?: import("../shared/energyPricing").EnergyCostWindow | null;
   estimated: boolean;
   membershipChanged: boolean;
   restartRequired: boolean;
@@ -550,6 +553,7 @@ export interface FleetEnergy {
 
 // ─── API responses ────────────────────────────────────────
 export interface Settings {
+  energyPricing?: import("../shared/energyPricing").EnergyPricing;
   pollIntervalMs: number;
   defaultLlmPort: number;
   autoHideOffline: boolean;

@@ -91,6 +91,55 @@ coverage at UTC minute boundaries`, also reproduces on untouched `main` at
 `754f40a`: its fixed 2026-08-23 fixture is pruned by the real-time 31-day retention
 window. This pre-existing test-clock issue is not changed by the carried PR.
 
+### Production energy efficiency and savings
+
+Enable **Settings → Show Fleet Energy**, then enter the values under
+**Electricity & API comparison prices**:
+
+- A currency code (default USD; use the same currency for every rate).
+- Electricity price per kWh.
+- Uncached input, cached input, and output prices **per million tokens**.
+
+Blank prices are unconfigured, not zero; an explicit zero means free. These
+settings persist with the dashboard's existing settings file. They are one
+comparison tariff for all observed models, not live provider rates or per-model
+overrides. Changing rates recalculates history using the new rates; it does not
+preserve historical tariffs or perform currency conversion.
+
+The efficiency tile now reads **M tokens/kWh**, using generated/output tokens:
+`M tokens/kWh = 1 / (1000 × Wh/output-token)`. The Fleet Energy card also shows:
+
+- **Electricity cost:** matched fleet kWh × electricity price/kWh.
+- **Power / M output tokens:** electricity cost ÷ (generated tokens / 1,000,000).
+  This includes prefill and idle electricity, not just decode power.
+- **Equivalent API cost:** `((prompt − cached) × input price + cached × cached
+  input price + generated × output price) / 1,000,000`. Cached tokens are a subset
+  of prompt tokens and are never billed twice.
+- **Savings after electricity:** equivalent API cost − electricity cost. Negative
+  savings remain negative. Hardware, external cooling, taxes, and fees are excluded.
+
+Cost estimates use **rolling 24-hour or 31-day matched intervals**, not lifetime
+token totals mixed with a shorter power window. The card displays actual matched
+hours. Each interval requires fresh whole-fleet power and exactly one monitored
+head endpoint with valid cumulative input, cached-input, and output counters.
+Idle power is included while that endpoint is observable. Missing telemetry,
+unknown cache splits, counter resets/anomalies, endpoint/model changes, and long
+sampling gaps are excluded rather than assumed free. Partially observed savings
+are not a claim about unobserved hours or the whole electricity bill.
+
+Matched accounting starts when this version is deployed; old energy/token totals
+cannot safely reconstruct it. It persists as optional minute-bucket fields in the
+existing fleet-energy file. Buckets prorate samples crossing minute boundaries;
+rolling windows have sub-minute boundary approximation. A restart re-seeds live
+counters without double counting. Back up the config volume before reverting to
+an upstream-only build, which does not preserve these extra accounting fields.
+All power is estimated from GPU/CPU telemetry, **not wall-metered**.
+
+This change also fixes the pre-existing energy test's clock to match its fixture;
+the PR import above remains intact as separate commits for rebasing.
+Validation: 351 server tests and 59 frontend tests pass, along with typechecking
+and the production build. Vite reports a non-blocking 500 kB chunk-size warning.
+
 <img src="./assets/screenshot.jpg" alt="sparkDash Overview page with multiple DGX Spark units, GPU metrics, and LLM status">
 
 ### LLM Prompt Showcase

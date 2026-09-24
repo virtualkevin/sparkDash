@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { SparkSnapshot } from "../../api/types";
+import type { EnergyPricing } from "../../shared/energyPricing";
 import { isWorkerSpark, resolveSparkRole } from "../../api/sparkRole";
 import { shutdownAllSparks, updateAllHermes, wakeAllSparks } from "../../api/client";
 import { ConfirmShutdownDialog } from "../ConfirmShutdownDialog";
@@ -14,6 +15,7 @@ interface OverviewPageProps {
   hideOffline?: boolean;
   hideWorkers?: boolean;
   showFleetEnergy?: boolean;
+  energyPricing?: EnergyPricing;
   showFleetExceptions?: boolean;
   showOverviewSearch?: boolean;
   /** Overview LLM token totals card (cumulative tokens per model). */
@@ -399,6 +401,7 @@ export function OverviewPage({
   hideOffline = false,
   hideWorkers = false,
   showFleetEnergy = false,
+  energyPricing,
   showFleetExceptions = false,
   showOverviewSearch = false,
   showLlmTokenTotals = false,
@@ -570,7 +573,7 @@ export function OverviewPage({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--density-overview-rhythm)" }}>
-      {showFleetEnergy ? <FleetEnergyCard nodeCount={sparks.length} /> : null}
+      {showFleetEnergy ? <FleetEnergyCard nodeCount={sparks.length} pricing={energyPricing} /> : null}
       {showFleetExceptions ? <FleetAlertStrip sparks={sparks} onSelect={onSelectSpark} /> : null}
       <div className="flex flex-wrap items-end justify-between gap-6">
         <h1

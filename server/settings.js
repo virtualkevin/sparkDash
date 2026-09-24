@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { atomicWrite } from "./util/atomicWrite.js";
+import { normalizeEnergyPricing, DEFAULT_ENERGY_PRICING } from "../src/shared/energyPricing.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +24,7 @@ const DEFAULTS = Object.freeze({
   density: "compact",
   /** Overview Fleet Energy card. Off by default. */
   showFleetEnergy: false,
+  energyPricing: DEFAULT_ENERGY_PRICING,
   /** Overview active fleet exceptions strip. Off by default. */
   showFleetExceptions: false,
   /** Overview search + status filter row. Off by default. */
@@ -56,6 +58,7 @@ function _clampSettings(settings) {
   // Ensure benchDebugTraces is boolean
   s.benchDebugTraces = Boolean(s.benchDebugTraces);
   s.showFleetEnergy = Boolean(s.showFleetEnergy);
+  s.energyPricing = normalizeEnergyPricing(s.energyPricing);
   s.showFleetExceptions = Boolean(s.showFleetExceptions);
   s.showOverviewSearch = Boolean(s.showOverviewSearch);
   s.showLlmTokenTotals = Boolean(s.showLlmTokenTotals);

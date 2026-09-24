@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { emptyAccounting, accountingDelta, validAccounting, addAccounting, accountingWindow } from "./tokenAccounting.js";
 
 const FILE_VERSION = 1;
 const MINUTE_MS = 60_000;
@@ -45,6 +46,7 @@ function emptyBucket(minuteStartMs, nodeIds) {
     fleetCoverageMs: 0,
     outputTokens: 0,
     coveredOutputTokens: 0,
+    accounting: emptyAccounting(),
   };
 }
 
@@ -124,6 +126,9 @@ function tokenObservation(snapshots, atMs, nodeIdSet) {
     headId: head.id,
     port,
     totalOutputTokens: entry.totalOutputTokens,
+    totalPromptTokens: entry.totalPromptTokens ?? null,
+    totalCachedTokens: entry.totalCachedTokens ?? null,
+    modelId: entry.modelId ?? null,
     observedAtMs: atMs,
   };
 }
@@ -131,7 +136,7 @@ function tokenObservation(snapshots, atMs, nodeIdSet) {
 function sameTokenSource(left, right) {
   return (
     left?.headId === right?.headId &&
-    left?.port === right?.port
+    left?.port === right?.port && left?.modelId === right?.modelId
   );
 }
 
@@ -344,7 +349,7 @@ export class FleetEnergyTracker {
     );
   }
 
-  _recordTokens(snapshots, atMs, hasFullFleetInterval) {
+  _recordTokens(snapshots, atMs, hasFullFleetInterval, fleetInterval) {
     const observation = tokenObservation(snapshots, atMs, this._nodeIdSet);
     if (!observation) return;
 
@@ -357,6 +362,26 @@ export class FleetEnergyTracker {
       observation.totalOutputTokens < previous.totalOutputTokens ||
       gapMs < 0 ||
       gapMs > MAX_GAP_MS;
+
+    // Join tokens and power only over exactly the same complete interval. Skip
+    // restarts, source changes, missing counters, stale samples and clock replays.
+    if (!rebase && hasFullFleetInterval && fleetInterval &&
+        previous.observedAtMs === fleetInterval.previous.atMs && atMs > previous.observedAtMs) {
+      const delta = accountingDelta(previous, observation);
+      if (delta) {
+        this._splitInterval(previous.observedAtMs, atMs,
+          fleetInterval.previous.watts, fleetInterval.current.watts,
+          (bucket, durationMs, watts) => {
+            const fraction = durationMs / (atMs - previous.observedAtMs);
+            addAccounting(bucket.accounting, {
+              wattMs: watts * durationMs, coverageMs: durationMs,
+              promptTokens: delta.promptTokens * fraction,
+              cachedTokens: delta.cachedTokens * fraction,
+              outputTokens: delta.outputTokens * fraction,
+            });
+          });
+      }
+    }
 
     if (!rebase && observation.totalOutputTokens > previous.totalOutputTokens) {
       const delta = observation.totalOutputTokens - previous.totalOutputTokens;
@@ -461,6 +486,7 @@ export class FleetEnergyTracker {
     }
 
     let hasFullFleetInterval = false;
+    let accountingInterval = null;
     if (this.nodeIds.length > 0 && validNodes.size === this.nodeIds.length) {
       const fleetWatts = [...validNodes.values()].reduce((sum, watts) => sum + watts, 0);
       const previous = this._fleetBaseline;
@@ -475,6 +501,7 @@ export class FleetEnergyTracker {
           : null;
       if (interval) {
         this._integrateFleet(interval.previous, interval.current);
+        accountingInterval = interval;
         hasFullFleetInterval = true;
         integratedAtTimestamp = true;
       }
@@ -491,7 +518,7 @@ export class FleetEnergyTracker {
       );
     }
 
-    this._recordTokens(snapshots, timestamp, hasFullFleetInterval);
+    this._recordTokens(snapshots, timestamp, hasFullFleetInterval, accountingInterval);
     this._latestFreshNodeCount = validNodes.size;
     this._latestRecordAt = timestamp;
     this._dirty = true;
@@ -507,6 +534,7 @@ export class FleetEnergyTracker {
     let fleetWattMs = 0;
     let outputTokens = 0;
     let coveredOutputTokens = 0;
+    const accounting = emptyAccounting();
 
     for (const bucket of this._buckets.values()) {
       if (bucket.minuteStartMs < cutoff || bucket.minuteStartMs > atMs) continue;
@@ -518,6 +546,7 @@ export class FleetEnergyTracker {
       fleetWattMs += bucket.fleetWattMs;
       outputTokens += bucket.outputTokens;
       coveredOutputTokens += bucket.coveredOutputTokens;
+      addAccounting(accounting, bucket.accounting);
     }
 
     const energyWh = Object.values(nodeWh).reduce((sum, value) => sum + value, 0);
@@ -530,6 +559,7 @@ export class FleetEnergyTracker {
       fleetEnergyWh: fleetWattMs / 3_600_000,
       outputTokens,
       coveredOutputTokens,
+      accounting: accountingWindow(accounting),
     };
   }
 
@@ -590,6 +620,8 @@ export class FleetEnergyTracker {
           ? last24h.fleetEnergyWh / last24h.coveredOutputTokens
           : null,
       outputTokens24h: last24h.outputTokens,
+      accounting24h: this._membershipChanged ? null : last24h.accounting,
+      accounting31d: this._membershipChanged ? null : last31d.accounting,
       coverage24hMs: last24h.fleetCoverageMs,
       coverage31dMs: last31d.fleetCoverageMs,
       nodeCoverage24hMs: last24h.nodeCoverageMs,
@@ -700,6 +732,9 @@ export class FleetEnergyTracker {
         bucket.fleetCoverageMs = candidate.fleetCoverageMs;
         bucket.outputTokens = candidate.outputTokens;
         bucket.coveredOutputTokens = candidate.coveredOutputTokens ?? 0;
+        if (validAccounting(candidate.accounting, bucket)) {
+          bucket.accounting = Object.fromEntries(Object.keys(emptyAccounting()).map((key) => [key, candidate.accounting[key]]));
+        }
         this._buckets.set(minuteStartMs, bucket);
       }
       this._bucketsOrdered = true;

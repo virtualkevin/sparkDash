@@ -168,6 +168,8 @@ function monitorWithCollectionState({
 }
 
 const APPROVED_RESPONSE_FIELDS = [
+  "accounting24h",
+  "accounting31d",
   "estimated",
   "membershipChanged",
   "restartRequired",
@@ -350,6 +352,8 @@ test("fleet-energy handler returns the exact empty tracker response contract", (
   assert.equal(response.energy24hKwh, null);
   assert.equal(response.energy31dKwh, null);
   assert.equal(response.whPerOutputToken24h, null);
+  assert.equal(response.accounting24h, null);
+  assert.equal(response.accounting31d, null);
   assert.deepEqual(response.hourlyWatts24h, Array(24).fill(null));
   assert.equal(response.membershipChanged, false);
   assert.deepEqual(response.trackedNodeIds, CANONICAL_NODE_IDS);
@@ -627,6 +631,7 @@ test("integration splits energy and coverage at UTC minute boundaries", (t) => {
   const tracker = new FleetEnergyTracker({
     filePath,
     load: false,
+    now: () => minute + 61_000,
     setIntervalFn: () => 1,
     clearIntervalFn: () => {},
   });
@@ -1190,6 +1195,9 @@ test("persistence reload preserves aggregates, token baseline, and does not back
     headId: "node-a",
     port: 8000,
     totalOutputTokens: 150,
+    totalPromptTokens: null,
+    totalCachedTokens: null,
+    modelId: null,
     observedAtMs: now + 2_000,
   });
   const before = first.snapshot(now + 2_000);

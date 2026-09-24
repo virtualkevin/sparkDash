@@ -352,6 +352,7 @@ function DashboardApp() {
               hideOffline={settings?.autoHideOffline ?? false}
               hideWorkers={hideWorkers}
               showFleetEnergy={settings?.showFleetEnergy ?? false}
+              energyPricing={settings?.energyPricing}
               showFleetExceptions={settings?.showFleetExceptions ?? false}
               showOverviewSearch={settings?.showOverviewSearch ?? false}
               showLlmTokenTotals={settings?.showLlmTokenTotals ?? false}

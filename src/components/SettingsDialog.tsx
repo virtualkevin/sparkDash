@@ -3,6 +3,7 @@ import { fetchSettings, updateSettings } from "../api/client";
 import type { Settings } from "../api/types";
 import { useModalPresence } from "../hooks/useModalPresence";
 import packageJson from "../../package.json";
+import { EnergyPricingFields } from "./EnergyPricingFields";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -69,6 +70,10 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
 
   const handleSave = async () => {
     if (!settings) return;
+    if (settings.energyPricing && !/^[A-Z]{3}$/.test(settings.energyPricing.currency)) {
+      setError("Enter a three-letter currency code (for example USD).");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -278,6 +283,8 @@ export function SettingsDialog({ open, onClose, onSaved }: SettingsDialogProps) 
                 </span>
               </label>
             </div>
+
+            <EnergyPricingFields value={settings.energyPricing} onChange={(energyPricing) => update({ energyPricing })} />
 
             {/* LLM Token Totals */}
             <div>

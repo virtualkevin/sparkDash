@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { fetchFleetEnergy } from "../../api/client";
 import type { FleetEnergy } from "../../api/types";
+import { millionTokensPerKwh, type EnergyPricing } from "../../shared/energyPricing";
+import { EnergyCosts } from "./EnergyCosts";
 
 const DAY_MS = 86_400_000;
 
@@ -8,7 +10,7 @@ function number(value: number | null, digits = 2): string {
   return value == null ? "—" : value.toFixed(digits);
 }
 
-export function FleetEnergyCard({ nodeCount }: { nodeCount: number }) {
+export function FleetEnergyCard({ nodeCount, pricing }: { nodeCount: number; pricing?: EnergyPricing }) {
   const [data, setData] = useState<FleetEnergy | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,7 +25,7 @@ export function FleetEnergyCard({ nodeCount }: { nodeCount: number }) {
   }, []);
 
   const coverage = data && nodeCount > 0
-    ? Math.min(100, (data.coverage24hMs / (DAY_MS * nodeCount)) * 100)
+    ? Math.min(100, (data.coverage24hMs / DAY_MS) * 100)
     : 0;
   const state = error
     ? `Energy telemetry unavailable: ${error}`
@@ -51,7 +53,7 @@ export function FleetEnergyCard({ nodeCount }: { nodeCount: number }) {
         <div><div className="text-[10px] text-muted">Current</div><strong className="font-tabular text-sm">{number(data?.currentWatts30s ?? null, 0)} W</strong></div>
         <div><div className="text-[10px] text-muted">24 hours</div><strong className="font-tabular text-sm">{number(data?.energy24hKwh ?? null)} kWh</strong></div>
         <div><div className="text-[10px] text-muted">31 days</div><strong className="font-tabular text-sm">{number(data?.energy31dKwh ?? null)} kWh</strong></div>
-        <div><div className="text-[10px] text-muted">Efficiency</div><strong className="font-tabular text-sm">{number(data?.whPerOutputToken24h ?? null, 4)} Wh/token</strong></div>
+        <div title="Millions of generated tokens per kWh; rolling 24h, including idle power in fully observed fleet intervals."><div className="text-[10px] text-muted">Output efficiency (24h)</div><strong className="font-tabular text-sm">{number(millionTokensPerKwh(data?.whPerOutputToken24h ?? null), 3)} M tokens/kWh</strong></div>
       </div>
       <div className="mt-3 flex h-12 items-end gap-px" aria-label="Hourly estimated watts for the last 24 hours, with gaps shown empty">
         {(data?.hourlyWatts24h ?? Array(24).fill(null)).map((watts, index, values) => {
@@ -59,6 +61,7 @@ export function FleetEnergyCard({ nodeCount }: { nodeCount: number }) {
           return <span key={index} className="min-w-0 flex-1 bg-accent/60" style={{ height: watts == null ? 0 : `${Math.max(4, (watts / max) * 100)}%` }} title={watts == null ? "No complete coverage" : `${watts.toFixed(0)} W`} />;
         })}
       </div>
+      <EnergyCosts data={error ? null : data} pricing={pricing} />
     </section>
   );
 }

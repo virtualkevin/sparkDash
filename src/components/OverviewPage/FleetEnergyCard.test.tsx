@@ -24,7 +24,7 @@ function energy(overrides: Partial<FleetEnergy> = {}): FleetEnergy {
     energy31dKwh: 40,
     whPerOutputToken24h: 0.0123,
     outputTokens24h: 100,
-    coverage24hMs: 86_400_000 * 2,
+    coverage24hMs: 86_400_000,
     coverage31dMs: 0,
     nodeCoverage24hMs: {},
     nodeCoverage31dMs: {},
@@ -40,7 +40,9 @@ describe("FleetEnergyCard states", () => {
     await flush();
     expect(container.textContent).toContain("Estimated, not wall-metered");
     expect(container.textContent).toContain("240 W");
-    expect(container.textContent).toContain("0.0123 Wh/token");
+    expect(container.textContent).toContain("0.081 M tokens/kWh");
+    expect(container.textContent).toContain("24h coverage 100.0%");
+    expect(container.textContent).not.toContain("Wh/token");
     const bars = [...container.querySelectorAll("[aria-label] span")];
     expect(bars.filter((bar) => (bar as HTMLElement).style.height === "0px" || (bar as HTMLElement).style.height === "0")).toHaveLength(6);
   });
