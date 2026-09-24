@@ -1,0 +1,28 @@
+# Site deployment: build the local production branch; never use the privileged
+# upstream compose file for this installation. Only Spark 1 hosts the app.
+name: sparkdash
+services:
+  sparkdash:
+    image: sparkdash-production:${SPARKDASH_IMAGE_TAG:-production}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sparkDash
+    restart: unless-stopped
+    user: "1000:1000"
+    tmpfs:
+      - /home/node/.ssh:uid=1000,gid=1000,mode=0700
+    ports:
+      - "5555:5555"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      BIND_HOST: 0.0.0.0
+      PORT: "5555"
+      LLM_PORT: "8000"
+      NODE_ENV: production
+      SSH_IDENTITY_FILE: /run/spark-ssh-key
+    volumes:
+      # Reuse the existing live data, not the fork's example/test config files.
+      - ${SPARKDASH_CONFIG_DIR:-../sparkdash/config}:/app/config
+      - ${SPARKDASH_SSH_KEY:-/home/nvidia/.ssh/id_ed25519_shared}:/run/spark-ssh-key:ro

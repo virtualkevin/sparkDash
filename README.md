@@ -140,6 +140,28 @@ the PR import above remains intact as separate commits for rebasing.
 Validation: 351 server tests and 59 frontend tests pass, along with typechecking
 and the production build. Vite reports a non-blocking 500 kB chunk-size warning.
 
+### Local production deployment (Spark 1)
+
+Run from this fork's checkout on the `production` branch:
+
+```bash
+docker compose -f compose.production.yaml build
+docker compose -f compose.production.yaml up -d --no-build
+```
+
+This serves port **5555** from our local source, not from a remote image or uvx.
+It preserves the existing non-root, capability-dropped bridge-network deployment
+and SSH-based collection on all four Sparks. The live config/history remains at
+`../sparkdash/config` (override with `SPARKDASH_CONFIG_DIR`); the SSH key defaults
+to `/home/nvidia/.ssh/id_ed25519_shared` (`SPARKDASH_SSH_KEY` overrides it).
+Existing tokenless LAN access is unchanged. Do not use the upstream default
+Compose file, which grants privileged host access. No inference container is
+managed by this Compose project. Code edits require a rebuild/recreate.
+
+Before replacing the dashboard, stop only `sparkDash` and back up its config
+directory with restricted permissions. Retain the prior image for rollback.
+Never run old and new dashboards concurrently against the same config directory.
+
 <img src="./assets/screenshot.jpg" alt="sparkDash Overview page with multiple DGX Spark units, GPU metrics, and LLM status">
 
 ### LLM Prompt Showcase
