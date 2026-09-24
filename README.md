@@ -15,6 +15,82 @@ sparkDash is a real-time web dashboard for one or more **NVIDIA DGX Spark (GB10)
 
 It also supports **non-Spark units**: any Linux machine with an NVIDIA GPU (e.g. a workstation with a dedicated RTX/L-series card) can be added as a **dedicated GPU host** and monitored the same way via SSH and `nvidia-smi`. For these units the dashboard correctly separates **RAM** (system memory) from **VRAM** (discrete GPU memory).
 
+## Production fork workflow
+
+This fork lives at [virtualkevin/sparkDash](https://github.com/virtualkevin/sparkDash).
+We keep our production changes as a small, reviewable commit stack on top of the
+[MiaAI-Lab baseline](https://github.com/MiaAI-Lab/sparkDash):
+
+- `origin` points to `virtualkevin/sparkDash`; `upstream` points to `MiaAI-Lab/sparkDash`.
+- `main` tracks upstream `main`. Do not put deployment-specific changes on it.
+- `production` contains our changes on top of `main`, including selected upstream
+  PRs that have not yet merged. Make and commit local changes on this branch (or
+  on feature branches based on it).
+- Updating source does **not** deploy it. Building/restarting the running dashboard
+  is a separate, explicit step. Keep host settings, credentials, and runtime data
+  outside the tracked patch stack; preserve the dashboard's persistent config volume.
+
+When adopting a new upstream baseline, start with a clean working tree and fetch
+both remotes. If `upstream` is missing, add it once with
+`git remote add upstream https://github.com/MiaAI-Lab/sparkDash.git`.
+
+```bash
+git fetch origin
+git fetch upstream
+git switch main
+git merge --ff-only origin/main
+git merge --ff-only upstream/main
+
+git switch production
+# Choose a unique backup name for each update; never overwrite an older backup.
+git branch backup/production-before-rebase-YYYYMMDD-HHMM
+git rebase main
+```
+
+If either fast-forward fails, inspect the divergent history rather than resetting
+it. Before rebasing, reconcile any changes published to `origin/production` by
+another contributor. Resolve rebase conflicts carefully, stage the resolved files,
+and run `git rebase --continue`; use `git rebase --abort` to return to the old stack.
+When upstream merges a carried PR, review whether its local commits can be dropped
+as redundant; do not keep duplicate implementations.
+
+Validate the rebased branch before deploying or publishing:
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+git diff --check main...production
+```
+
+When ready to publish, push `main` normally. The first production push is
+`git push -u origin production`; after an intentional rebase of a published
+production branch, coordinate with other contributors and use
+`git push --force-with-lease origin production`, never an unconditional force push.
+Do not push our production changes to MiaAI's upstream `main`.
+
+### Carried changes
+
+- [MiaAI-Lab/sparkDash PR #111](https://github.com/MiaAI-Lab/sparkDash/pull/111),
+  **LLM token totals per model**, imported from Acermax's six commits through
+  `10932231ab45ec9a946ecbcdabbd9929c94d7e08` using `git cherry-pick -x`.
+  The initial baseline is `754f40a` (v1.8.8). Original authorship and source commit
+  references are retained for future rebases. The Overview card is opt-in under
+  **Settings → Show LLM Token Totals**. Its ledger persists in
+  `config/llm-token-totals.json` (or `LLM_TOKEN_JSON_PATH`); it records observed
+  counter deltas, not historical traffic from before deployment.
+
+### Initial validation (2026-09-24)
+
+Validated in an isolated Node 22 container without access to the running dashboard
+or inference services: locked dependency installation, typecheck, all 55 frontend
+tests, and the production build passed. Server tests: 342/343 passed, including all
+18 new ledger/format tests. The one failure, `integration splits energy and
+coverage at UTC minute boundaries`, also reproduces on untouched `main` at
+`754f40a`: its fixed 2026-08-23 fixture is pruned by the real-time 31-day retention
+window. This pre-existing test-clock issue is not changed by the carried PR.
+
 <img src="./assets/screenshot.jpg" alt="sparkDash Overview page with multiple DGX Spark units, GPU metrics, and LLM status">
 
 ### LLM Prompt Showcase
@@ -29,6 +105,7 @@ It also supports **non-Spark units**: any Linux machine with an NVIDIA GPU (e.g.
 
 ## Table of contents
 
+- [Production fork workflow](#production-fork-workflow)
 - [Latest version changelog](#latest-version-changelog)
 - [Features](#features)
 - [ComfyUI monitoring](#comfyui-monitoring)
