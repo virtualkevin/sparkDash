@@ -40,7 +40,7 @@ describe("FleetEnergyCard states", () => {
     await flush();
     expect(container.textContent).toContain("Estimated, not wall-metered");
     expect(container.textContent).toContain("240 W");
-    expect(container.textContent).toContain("0.081 M tokens/kWh");
+    expect(container.textContent).toContain("0.081M / kWh");
     expect(container.textContent).toContain("24h coverage 100.0%");
     expect(container.textContent).not.toContain("Wh/token");
     const bars = [...container.querySelectorAll("[aria-label] span")];

@@ -12,10 +12,7 @@ const data = { membershipChanged: false, accounting24h: window,
 describe("EnergyCosts", () => {
   it("displays effective generated-token costs and net savings using separate cached pricing", () => {
     const { container } = render(<EnergyCosts data={data} pricing={pricing} />);
-    expect(container.textContent).toContain("USD 3.00");
-    expect(container.textContent).toContain("USD 6.00");
-    expect(container.textContent).toContain("USD 6.20");
-    expect(container.textContent).toContain("USD 3.20");
+    expect([...container.querySelectorAll("strong")].map((el) => el.textContent)).toEqual(["$3.00", "$6.00", "$6.20", "$3.20"]);
     expect(container.textContent).toContain("1.00 / 24 hours");
     expect(container.textContent).toContain("1M cached input");
   });
@@ -24,14 +21,22 @@ describe("EnergyCosts", () => {
     const select = container.querySelector("select")!;
     act(() => { select.value = "31d"; select.dispatchEvent(new Event("change", { bubbles: true })); });
     expect(container.textContent).toContain("1.00 / 744 hours");
-    expect(container.textContent).toContain("USD -23.80");
+    expect(container.textContent).toContain("-$23.80");
   });
   it("does not show misleading zero prices for missing rates or unmatched telemetry", () => {
     const unpriced = render(<EnergyCosts data={data} />);
     expect(unpriced.container.textContent).toContain("Enter electricity");
-    expect(unpriced.container.textContent).not.toContain("USD 0.00");
+    expect(unpriced.container.textContent).not.toContain("$0.00");
     const unavailable = render(<EnergyCosts data={{ ...data, membershipChanged: true }} pricing={pricing} />);
     expect(unavailable.container.textContent).toContain("Waiting for matched telemetry");
-    expect(unavailable.container.textContent).not.toContain("USD 3.20");
+    expect(unavailable.container.textContent).not.toContain("$3.20");
+  });
+  it("rounds every monetary value to exactly two decimal places", () => {
+    const { container } = render(<EnergyCosts data={data} pricing={{ ...pricing, electricityPerKwh: 0.01049 }} />);
+    expect([...container.querySelectorAll("strong")].map((el) => el.textContent)).toEqual(["$0.10", "$0.21", "$6.20", "$6.10"]);
+  });
+  it("uses the selected currency and keeps zero values at two decimals", () => {
+    const { container } = render(<EnergyCosts data={data} pricing={{ ...pricing, currency: "EUR", electricityPerKwh: 0 }} />);
+    expect([...container.querySelectorAll("strong")].map((el) => el.textContent)).toEqual(["€0.00", "€0.00", "€6.20", "€6.20"]);
   });
 });

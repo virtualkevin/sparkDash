@@ -8,7 +8,13 @@ export function EnergyCosts({ data, pricing }: { data: FleetEnergy | null; prici
   const window = data?.membershipChanged ? null : range === "24h" ? data?.accounting24h : data?.accounting31d;
   const rates = normalizeEnergyPricing(pricing);
   const costs = calculateEnergyCosts(window, rates);
-  const money = (n: number | null) => n == null ? "—" : `${rates.currency} ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`;
+  const currency = new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: rates.currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  const money = (n: number | null) => n == null ? "—" : currency.format(n);
   return <div className="mt-4 border-t border-border pt-3">
     <div className="flex items-center justify-between gap-2">
       <h3 className="text-xs font-semibold text-text-strong">Power cost &amp; API savings</h3>

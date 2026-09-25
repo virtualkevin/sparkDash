@@ -106,7 +106,7 @@ comparison tariff for all observed models, not live provider rates or per-model
 overrides. Changing rates recalculates history using the new rates; it does not
 preserve historical tariffs or perform currency conversion.
 
-The efficiency tile now reads **M tokens/kWh**, using generated/output tokens:
+The efficiency tile displays values like **0.179M / kWh**, using generated/output tokens:
 `M tokens/kWh = 1 / (1000 × Wh/output-token)`. The Fleet Energy card also shows:
 
 - **Electricity cost:** matched fleet kWh × electricity price/kWh.
