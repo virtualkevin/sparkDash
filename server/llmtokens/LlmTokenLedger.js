@@ -11,7 +11,7 @@
  * backwards mean the engine restarted — the baseline is re-seeded without
  * crediting anything.
  *
- * Storage shape (config/llm-token-totals.json):
+ * In-memory/legacy JSON shape (production persists incrementally in SQLite):
  * {
  *   "version": 1,
  *   "series": {
@@ -117,22 +117,26 @@ export class LlmTokenLedger {
   /**
    * @param {string} [filePath]
    */
-  constructor(filePath = DEFAULT_LEDGER_PATH) {
+  constructor(filePath = DEFAULT_LEDGER_PATH, { storage = null } = {}) {
     this.filePath = filePath;
+    this._storage = storage;
     /** @type {{ version: number, series: Record<string, unknown> }} */
     this._data = { version: 1, series: {} };
     this._dirty = false;
     this._flushTimer = null;
     this._load();
+    // Commit the one-time import before sampling or serving the API.
+    if (storage?.needsInitialization) storage.write(this._data);
   }
 
   _load() {
     try {
-      if (!fs.existsSync(this.filePath)) return;
-      const raw = JSON.parse(fs.readFileSync(this.filePath, "utf8"));
+      if (!this._storage && !fs.existsSync(this.filePath)) return;
+      const raw = this._storage ? this._storage.read() : JSON.parse(fs.readFileSync(this.filePath, "utf8"));
       if (!raw || typeof raw !== "object" || !raw.series || typeof raw.series !== "object") return;
       this._data = { version: 1, series: this._sanitize(raw.series) };
-    } catch {
+    } catch (error) {
+      if (this._storage) throw error;
       this._data = { version: 1, series: {} };
     }
   }
@@ -195,7 +199,8 @@ export class LlmTokenLedger {
     if (this._flushTimer) return;
     this._flushTimer = setTimeout(() => {
       this._flushTimer = null;
-      this.flush();
+      try { this.flush(); }
+      catch { this._scheduleFlush(); } // Retry failed commits with dirty state intact.
     }, FLUSH_MS);
     this._flushTimer.unref?.();
   }
@@ -203,10 +208,12 @@ export class LlmTokenLedger {
   flush() {
     if (!this._dirty) return;
     try {
-      atomicWrite(this.filePath, JSON.stringify(this._data));
+      if (this._storage) this._storage.write(this._data);
+      else atomicWrite(this.filePath, JSON.stringify(this._data));
       this._dirty = false;
     } catch (err) {
       console.error("[LlmTokenLedger] write failed:", err.message);
+      if (this._storage) throw err;
     }
   }
 
@@ -420,5 +427,3 @@ export class LlmTokenLedger {
     return { range: dayCount == null ? "all" : range, series };
   }
 }
-
-export const llmTokenLedger = new LlmTokenLedger();

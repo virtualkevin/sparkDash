@@ -39,11 +39,13 @@ import { llmDaily } from "./collectors/LlmDaily.js";
 import {
   createLlmTokenRuntime,
   registerLlmTokenTotalsRoute,
-  llmTokenLedger,
 } from "./llmtokens/LlmTokenRuntime.js";
+import { LlmTokenLedger } from "./llmtokens/LlmTokenLedger.js";
+import { SqliteTokenStore } from "./llmtokens/SqliteTokenStore.js";
 import { closeLlmStreamAgent } from "./collectors/LlmStreaming.js";
 import { compareSemver, getLatestRelease } from "./collectors/HermesReleases.js";
-import { FLEET_ENERGY_JSON_PATH } from "./config.js";
+import { FLEET_ENERGY_JSON_PATH, FLEET_ENERGY_SQLITE_PATH, LLM_TOKEN_JSON_PATH } from "./config.js";
+import { SqliteEnergyStore } from "./energy/SqliteEnergyStore.js";
 import { FleetEnergyTracker } from "./energy/FleetEnergyTracker.js";
 import {
   createFleetEnergyRuntime,
@@ -252,9 +254,14 @@ function consumeBenchStartQuota(req, res) {
 // ─── Spark registry ──────────────────────────────────────
 const registry = new SparkRegistry();
 
+const telemetryStore = new SqliteEnergyStore({ filePath: FLEET_ENERGY_SQLITE_PATH, legacyPath: FLEET_ENERGY_JSON_PATH });
+const llmTokenLedger = new LlmTokenLedger(LLM_TOKEN_JSON_PATH, {
+  storage: new SqliteTokenStore({ db: telemetryStore.db, legacyPath: LLM_TOKEN_JSON_PATH }),
+});
 const fleetEnergyTracker = new FleetEnergyTracker({
   nodeIds: registry.sparkIds,
   filePath: FLEET_ENERGY_JSON_PATH,
+  storage: telemetryStore,
 });
 
 // ─── Monitor map ─────────────────────────────────────────

@@ -77,8 +77,9 @@ Do not push our production changes to MiaAI's upstream `main`.
   `10932231ab45ec9a946ecbcdabbd9929c94d7e08` using `git cherry-pick -x`.
   The initial baseline is `754f40a` (v1.8.8). Original authorship and source commit
   references are retained for future rebases. The Overview card is opt-in under
-  **Settings → Show LLM Token Totals**. Its ledger persists in
-  `config/llm-token-totals.json` (or `LLM_TOKEN_JSON_PATH`); it records observed
+  **Settings → Show LLM Token Totals**. Its ledger now persists alongside energy in
+  `config/fleet-energy.sqlite`; `llm-token-totals.json` (or `LLM_TOKEN_JSON_PATH`)
+  is a one-time legacy import source. It records observed
   counter deltas, not historical traffic from before deployment.
 
 ### Initial validation (2026-09-24)
@@ -128,16 +129,76 @@ sampling gaps are excluded rather than assumed free. Partially observed savings
 are not a claim about unobserved hours or the whole electricity bill.
 
 Matched accounting starts when this version is deployed; old energy/token totals
-cannot safely reconstruct it. It persists as optional minute-bucket fields in the
-existing fleet-energy file. Buckets prorate samples crossing minute boundaries;
+cannot safely reconstruct it. It persists with the minute buckets in the
+fleet-energy SQLite database. Buckets prorate samples crossing minute boundaries;
 rolling windows have sub-minute boundary approximation. A restart re-seeds live
 counters without double counting. Back up the config volume before reverting to
 an upstream-only build, which does not preserve these extra accounting fields.
 All power is estimated from GPU/CPU telemetry, **not wall-metered**.
 
+For vLLM, cached-input usage prefers `vllm:prompt_tokens_cached_total`, which
+advances with prompt usage. `prefix_cache_hits_total` remains the diagnostic
+hit-rate source and a best-effort fallback for older servers: scheduler hits
+can arrive before prompt usage and are unsuitable for exact interval billing.
+This corrects future accounting; historical cached/uncached classifications
+are not automatically rewritten. The source change is included in local
+production image rebuilds, and accumulated history persists in the config mount.
+
+### Incremental energy and token storage (production)
+
+The server uses `config/fleet-energy.sqlite` on Spark 1's local config bind
+mount. It requires Node 22.13+ with `node:sqlite`; our image uses Node22.23.3 /
+SQLite3.51.3. Node22 labels this API experimental; no separate database service
+or additional native npm dependency is required.
+
+- Live sampling remains every2 seconds; dirty state commits every30 seconds
+  and on graceful shutdown. Dashboard response fields and refresh are unchanged.
+- Each minute is a separate row. Only changed minutes, expired-row deletions,
+  and small metadata/counter baselines are written, in one transaction. Completed
+  history is not rewritten on every save. Retention remains31 days.
+- WAL mode and `synchronous=FULL` keep committed transactions durable; an abrupt
+  stop can still lose samples not yet committed (normally up to30 seconds).
+  SQLite checkpoints automatically at1000 WAL pages and closes cleanly on exit.
+- On first startup, existing `fleet-energy.json` is validated through the same
+  tracker rules and imported transactionally. The original JSON is left unchanged
+  and is never imported again once initialization commits. Corrupt databases,
+  malformed import files, and unknown schema versions fail startup rather than
+  silently discarding history. Existing tracker retention/scope rules still apply.
+- Keep the database on local storage, not NFS. Run only one dashboard against
+  the config directory. Database files are created mode0600.
+- Token totals share this database and connection. Schema v2 adds separate rows
+  for endpoint counter baselines, per-model lifetime totals, and per-UTC-day
+  model totals. Only changed rows and retention deletions commit, atomically,
+  every30 seconds while dirty and on graceful shutdown. Sampling remains15 seconds.
+  Daily token history retains35 days; lifetime totals and API ranges are unchanged.
+- `llm-token-totals.json` is imported once, before sampling starts, without
+  rewriting it. Empty imports also record initialization, so a stale JSON file
+  cannot later overwrite the database. Malformed imports fail startup. The
+  pre-existing cached/uncached accounting issue is not retroactively repaired.
+- Settings and daily **throughput-rate** summaries (`llm-daily.json`, distinct
+  from daily token counts) remain in their existing small JSON files.
+
+Before deployment, stop only the dashboard and back up its entire config
+directory. For later backups, either stop the dashboard first and copy the
+directory, or use SQLite's backup API; copying just the main database while it
+is running can miss committed data in `-wal`. Never delete the WAL to save space.
+The untouched legacy JSON is only the migration-time snapshot. Reverting to a
+JSON-only image would use that stale snapshot: preserve a current SQLite backup
+and export its latest state before a lossless rollback. Do not delete/reimport
+the database as a routine restart action. Images predating schema v2 refuse the
+upgraded database: use the pre-upgrade backup for a rollback (losing newer
+samples), or export current data before a lossless downgrade.
+
+Regression tests cover one-time migration, API snapshot equivalence, minute
+rollover, token rebasing, retention, transaction rollback/retry, and SIGKILL
+recovery. A synthetic full31-day history test measures60 steady-state saves;
+WAL bytes and process write_bytes are reported separately, not claimed as SSD
+NAND writes. Existing JSON persistence remains available in the tracker for
+legacy tests; production server wiring always selects SQLite.
+
 This change also fixes the pre-existing energy test's clock to match its fixture;
 the PR import above remains intact as separate commits for rebasing.
-Validation: 351 server tests and 59 frontend tests pass, along with typechecking
+Validation: 366 server tests and 61 frontend tests pass, along with typechecking
 and the production build. Vite reports a non-blocking 500 kB chunk-size warning.
 
 ### Local production deployment (Spark 1)
@@ -575,7 +636,8 @@ Copy `.env.example` to `.env` if needed:
 | `HOST_ROOT_PATH` | `/host/root` | Host root mount |
 | `SSH_IDENTITY_FILE` | _(unset)_ | Path **inside the process** to a private key (`ssh -i`). Use when the bind-mount is not a default OpenSSH name. |
 | `SSH_CONTROL_PERSIST_SECONDS` | `60` | Reuse authenticated SSH transports for remote collectors. Set to `0` to disable multiplexing. |
-| `FLEET_ENERGY_JSON_PATH` | `config/fleet-energy.json` | Rolling fleet-energy persistence path |
+| `FLEET_ENERGY_JSON_PATH` | `config/fleet-energy.json` | Legacy energy JSON import source |
+| `FLEET_ENERGY_SQLITE_PATH` | Legacy path with `.json` replaced by `.sqlite` | Incremental energy database on local storage |
 
 > The listener and both Compose files default to `127.0.0.1`. Existing Docker users who opened
 > `http://<host-ip>:5555` must migrate to an SSH tunnel, authenticated reverse proxy, Tailscale

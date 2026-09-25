@@ -10,9 +10,6 @@ import { extractTokenObservations, normalizeLlmTokenRange } from "./LlmTokenLedg
 /** Ledger sampling cadence. Independent of the probe poll interval on purpose. */
 const TOKEN_SAMPLE_INTERVAL_MS = 15_000;
 
-/** Convenience re-export so index.js needs a single import for the whole feature. */
-export { llmTokenLedger } from "./LlmTokenLedger.js";
-
 /**
  * Build the read-only Express handler for GET /api/llm-token-totals.
  * Optional `?range=` (all | today | 7d | 14d | 30d); invalid values fall back to all.

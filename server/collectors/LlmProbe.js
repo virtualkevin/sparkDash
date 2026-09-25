@@ -887,11 +887,13 @@ export class LlmProbe {
       this.lastTokenCounts.output = genTokens;
       this.totalOutputTokens = genTokens;
       this.totalPromptTokens = promptTokens;
-      // vLLM prefix-cache counters are token-granular (queries += prompt
-      // tokens/request, hits += tokens served from cache), so cached_tokens
-      // is directly the cumulative cached share of the prompt.
-      const cachedTok = this._getVllmMetric(txt, "prefix_cache_hits_total");
-      if (cachedTok != null) this.totalCachedTokens = cachedTok;
+      // Usage counters advance together with prompt_tokens_total. Scheduler
+      // prefix-cache hits can arrive earlier, making per-poll accounting drop
+      // the cache credit and later misclassify the prompt as uncached.
+      // Older vLLM versions only expose the scheduler counter (best effort).
+      this.totalCachedTokens =
+        this._getVllmMetric(txt, "prompt_tokens_cached_total") ??
+        this._getVllmMetric(txt, "prefix_cache_hits_total");
       const ttftSum = this._getVllmMetric(txt, "time_to_first_token_seconds_sum");
       const deltaIter =
         iterSum != null && this.lastIterSum != null ? iterSum - this.lastIterSum : 0;

@@ -110,6 +110,19 @@ test("vLLM probe: counter diffs + tiles; skips get_server_info when known vllm",
   assert.ok(!hits.some((h) => h.includes("get_server_info")));
 });
 
+test("vLLM accounting prefers cached prompt usage, including zero; cache diagnostics stay scheduler-based", () => {
+  const probe = new LlmProbe({ lanIp: "10.0.0.1" }, 8000);
+  for (const cached of [0, 7]) {
+    probe._applyVllmMetrics(`${VLLM_METRICS}\nvllm:prompt_tokens_cached_total{engine="0"} ${cached}\n`, 2);
+    assert.equal(probe.totalCachedTokens, cached);
+    assert.equal(probe.prefixCacheHitRate, 0.5);
+  }
+  probe._applyVllmMetrics(VLLM_METRICS, 2);
+  assert.equal(probe.totalCachedTokens, 10); // Older versions: scheduler fallback.
+  probe._applyVllmMetrics(VLLM_METRICS.replace(/^vllm:prefix_cache_hits_total.*\n/m, ""), 2);
+  assert.equal(probe.totalCachedTokens, null); // Never retain a stale cache counter.
+});
+
 test("vLLM idle: flat counters → 0 tok/s (not sticky gauge logic)", async () => {
   const probe = new LlmProbe({ lanIp: "10.0.0.1" }, 8000);
   probe.serverIsOpenAI = true;

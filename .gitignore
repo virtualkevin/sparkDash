@@ -13,6 +13,9 @@ config/llm-daily.json
 config/llm-token-totals.json
 config/llm-token-totals.json.*
 config/fleet-energy.json
+config/*.sqlite
+config/*.sqlite-wal
+config/*.sqlite-shm
 config/.fleet-energy.json.*.tmp
 config/gpu-memory.json
 config/gpu-memory.json.*

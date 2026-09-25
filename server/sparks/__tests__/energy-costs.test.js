@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { FleetEnergyTracker } from "../../energy/FleetEnergyTracker.js";
 import { accountingDelta } from "../../energy/tokenAccounting.js";
+import { LlmProbe } from "../../collectors/LlmProbe.js";
 import { calculateEnergyCosts, normalizeEnergyPricing, millionTokensPerKwh } from "../../../src/shared/energyPricing.js";
 
 const T0 = Date.UTC(2026, 8, 24, 12);
@@ -53,6 +54,28 @@ test("accounting: counts exact matched fleet intervals, including idle power", (
   assert.equal(window.outputTokens, 200);
   assert.equal(window.promptTokens, 1000);
   assert.equal(window.cachedTokens, 600);
+});
+
+test("accounting: early vLLM scheduler cache hits do not turn cached input into uncached usage", () => {
+  const t = tracker();
+  const probe = new LlmProbe({ lanIp: "10.0.0.1" }, 8000);
+  const record = (at, prompt, hits, cached, output) => {
+    probe._applyVllmMetrics(`vllm:prompt_tokens_total ${prompt}
+vllm:prefix_cache_hits_total ${hits}
+vllm:prompt_tokens_cached_total ${cached}
+vllm:generation_tokens_total ${output}
+`, 2);
+    t.record(snapshots(probe.totalOutputTokens, probe.totalPromptTokens, probe.totalCachedTokens), at);
+  };
+  record(T0, 0, 0, 0, 0);
+  record(T0 + 2000, 0, 227584, 0, 0); // Scheduler sees the cache hit first.
+  record(T0 + 4000, 231128, 227584, 227584, 54); // Usage arrives next poll.
+  const window = t.snapshot(T0 + 4000).accounting24h;
+  assert.equal(window.promptTokens, 231128);
+  assert.equal(window.cachedTokens, 227584);
+  assert.equal(window.promptTokens - window.cachedTokens, 3544);
+  assert.equal(window.outputTokens, 54);
+  assert.equal(window.coverageMs, 4000);
 });
 
 test("accounting: missing power/counters, counter reset, model switch and long gaps do not invent savings", () => {

@@ -227,12 +227,17 @@ export class FleetEnergyTracker {
     clearIntervalFn = clearInterval,
     fileSystem = fs,
     writeState = writeStateAtomically,
+    storage = null,
   } = {}) {
     this.nodeIds = Object.freeze(normalizeNodeIds(nodeIds));
     this._nodeIdSet = new Set(this.nodeIds);
     this._minimumFleetWatts = MIN_NODE_WATTS * this.nodeIds.length;
     this._maximumFleetWatts = 240 * this.nodeIds.length;
-    this.filePath = filePath;
+    this.filePath = storage?.filePath ?? filePath;
+    this._storage = storage;
+    this._storageReplace = Boolean(storage?.needsInitialization);
+    this._changedMinutes = new Set();
+    this._deletedMinutes = new Set();
     this._now = typeof now === "function" ? now : () => Date.now();
     this._setInterval = setIntervalFn;
     this._clearInterval = clearIntervalFn;
@@ -254,7 +259,19 @@ export class FleetEnergyTracker {
     this._dirty = false;
     this._flushTimer = null;
 
-    if (load) this._load();
+    try {
+      if (load) this._load();
+      // Import validated/normalized legacy history once, before serving. A
+      // failed import must not silently start an empty replacement history.
+      if (storage && (storage.needsInitialization || this._storageReplace || this._dirty)) {
+        this._storageReplace = true;
+        this._dirty = true;
+        this.flush();
+      }
+    } catch (error) {
+      storage?.close();
+      throw error;
+    }
 
     const requestedFlushMs = Number.isFinite(flushIntervalMs) && flushIntervalMs > 0
       ? flushIntervalMs
@@ -292,6 +309,10 @@ export class FleetEnergyTracker {
   }
 
   _bucket(minuteStartMs) {
+    if (this._storage) {
+      this._changedMinutes.add(minuteStartMs);
+      this._deletedMinutes.delete(minuteStartMs);
+    }
     let bucket = this._buckets.get(minuteStartMs);
     if (!bucket) {
       bucket = emptyBucket(minuteStartMs, this.nodeIds);
@@ -422,6 +443,8 @@ export class FleetEnergyTracker {
     for (const minuteStartMs of this._buckets.keys()) {
       if (minuteStartMs >= cutoff) break;
       this._buckets.delete(minuteStartMs);
+      this._changedMinutes.delete(minuteStartMs);
+      if (this._storage) this._deletedMinutes.add(minuteStartMs);
       changed = true;
     }
 
@@ -429,6 +452,8 @@ export class FleetEnergyTracker {
     while (this._buckets.size > maximum) {
       const oldest = this._buckets.keys().next().value;
       this._buckets.delete(oldest);
+      this._changedMinutes.delete(oldest);
+      if (this._storage) this._deletedMinutes.add(oldest);
       changed = true;
     }
     if (this._buckets.size === 0) this._latestBucketStart = null;
@@ -635,7 +660,10 @@ export class FleetEnergyTracker {
   _load() {
     if (!this.filePath) return;
     try {
-      const raw = JSON.parse(this._fs.readFileSync(this.filePath, "utf8"));
+      const raw = this._storage
+        ? this._storage.read()
+        : JSON.parse(this._fs.readFileSync(this.filePath, "utf8"));
+      if (raw === null) return;
       const legacyNodeIds = !Object.prototype.hasOwnProperty.call(raw || {}, "nodeIds");
       if (
         raw?.version !== FILE_VERSION ||
@@ -645,6 +673,7 @@ export class FleetEnergyTracker {
             raw.nodeIds.length !== this.nodeIds.length ||
             raw.nodeIds.some((id) => !this._nodeIdSet.has(id))))
       ) {
+        if (this._storage) this._storageReplace = true;
         return;
       }
 
@@ -797,6 +826,7 @@ export class FleetEnergyTracker {
       const now = this._now();
       if (Number.isFinite(now)) this._prune(now);
     } catch (error) {
+      if (this._storage) throw error;
       if (error?.code === "ENOENT") return;
       console.warn(`[FleetEnergyTracker] unable to load ${this.filePath}: ${error.message}`);
     }
@@ -806,9 +836,6 @@ export class FleetEnergyTracker {
     if (!this.filePath || !this._dirty) return false;
     const now = this._now();
     if (Number.isFinite(now)) this._prune(now);
-    const buckets = [...this._buckets.values()].sort(
-      (left, right) => left.minuteStartMs - right.minuteStartMs
-    );
     const state = {
       version: FILE_VERSION,
       nodeIds: this.nodeIds,
@@ -818,9 +845,19 @@ export class FleetEnergyTracker {
           ? null
           : Math.ceil(this._integrationHighWaterMs),
       tokenCounter: this._tokenCounter,
-      buckets,
     };
-    this._writeState(this.filePath, `${JSON.stringify(state)}\n`, this._fs);
+    if (this._storage) {
+      const buckets = this._storageReplace
+        ? this._buckets.values()
+        : [...this._changedMinutes].map((minute) => this._buckets.get(minute));
+      this._storage.write(state, buckets, this._deletedMinutes, { replace: this._storageReplace });
+      this._storageReplace = false;
+      this._changedMinutes.clear();
+      this._deletedMinutes.clear();
+    } else {
+      state.buckets = [...this._buckets.values()].sort((left, right) => left.minuteStartMs - right.minuteStartMs);
+      this._writeState(this.filePath, `${JSON.stringify(state)}\n`, this._fs);
+    }
     this._dirty = false;
     return true;
   }
@@ -830,7 +867,9 @@ export class FleetEnergyTracker {
       this._clearInterval?.(this._flushTimer);
       this._flushTimer = null;
     }
-    return this.flush();
+    const flushed = this.flush();
+    this._storage?.close();
+    return flushed;
   }
 }
 
